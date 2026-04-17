@@ -70,7 +70,7 @@ export function useMovies(options: UseMoviesOptions = {}): UseMoviesReturn {
     abortControllerRef.current = new AbortController();
 
     try {
-      const apiKey = import.meta.env.VITE_TMDB_KEY;
+      const apiKey = (import.meta as any).env.VITE_TMDB_KEY;
       if (!apiKey) {
         throw new Error('API Key ausente. Verifica tus variables de entorno.');
       }
@@ -98,7 +98,7 @@ export function useMovies(options: UseMoviesOptions = {}): UseMoviesReturn {
         try {
           const parsedCache: CacheItem = JSON.parse(cachedResponse);
           const isFresh = (Date.now() - parsedCache.timestamp) < CACHE_TTL;
-          
+
           if (isFresh) {
             setMovies(prev => page === 1 ? parsedCache.data.results : [...prev, ...parsedCache.data.results]);
             setHasMore(parsedCache.data.page < parsedCache.data.total_pages);
@@ -109,6 +109,26 @@ export function useMovies(options: UseMoviesOptions = {}): UseMoviesReturn {
           }
         } catch {
           sessionStorage.removeItem(cacheKey); // Resuelve corrupción de JSON manual
+        }
+      }
+
+      // Interceptar la resolución paralela del prefetch hecho en main.tsx
+      const globalPrefetch = (window as any).__moviePrefetch;
+      if (page === 1 && !options.genreId && !options.year && globalPrefetch) {
+        // Aprovechar la request que ya inició antes de React
+        const prefetchData = await globalPrefetch;
+        delete (window as any).__moviePrefetch; // Limpieza
+
+        if (prefetchData && isValidTMDBResponse(prefetchData)) {
+          // Guardar en caché para cumplir con el contrato del hook original
+          sessionStorage.setItem(cacheKey, JSON.stringify({
+            timestamp: Date.now(),
+            data: prefetchData
+          }));
+          setMovies(prefetchData.results);
+          setHasMore(prefetchData.page < prefetchData.total_pages);
+          setLoading(false);
+          return;
         }
       }
 
